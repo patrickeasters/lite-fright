@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lite Fright</title>
+    <style>
+
+        /* Ensure the grid fills the screen width */
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(20, 1fr); /* 30 columns of equal size */
+            gap: 1px;
+            width: 95vw; /* Take full viewport width */
+            max-width: 95vw;
+            margin: 0 auto;
+        }
+        
+        .cell {
+            padding-bottom: 100%; /* Makes the cell square by setting the height based on width */
+            background-color: #000000;
+            border: 1px solid #ccc;
+        }
+
+        /* Ensure color picker is responsive */
+        h3, #colorPicker {
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h3>Select Color:</h3>
+    <input type="color" id="colorPicker" value="#ff0000">
+    <input type="button" id="erase" value="Erase">
+    <div id="grid"></div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script>
+        function genState() {
+            var state = {}
+            $(".cell").each(function( index ) {
+                state[$(this).data("pixel")] = $(this).css('background-color')
+            });
+            return state
+        }
+        function applyState(state) {
+            for (const [i, color] of Object.entries(state)) {
+                $(`.cell[data-pixel="${i}"]`).css('background-color', color);
+            }
+        }
+        function getRGB(pixel) {
+            rgb = $(`.cell[data-pixel="${pixel}"]`).css('background-color').match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+            return {
+                "r": rgb[1],
+                "g": rgb[2],
+                "b": rgb[3],
+            }
+        }
+        $(document).ready(function () {
+
+            // Function to parse hash parameters
+            function getHashParams() {
+                const hash = window.location.hash.substring(1);
+                const params = {};
+                const regex = /([^&=]+)=([^&]*)/g;
+                let match;
+                
+                while (match = regex.exec(hash)) {
+                    params[decodeURIComponent(match[1])] = decodeURIComponent(match[2]);
+                }
+                
+                return params;
+            }
+
+            // DO MQTT STUFF
+            // Extract username and password from hash
+            const hashParams = getHashParams();
+            const username = hashParams['username'];
+            const password = hashParams['password'];
+
+            // Connect to the broker using WSS and extracted credentials
+            const client = mqtt.connect('wss://mqtt.easte.rs:8443', {
+                username: username,
+                password: password,
+                protocol: 'wss'
+            });
+
+            // Handle connection events
+            client.on('connect', () => {
+                console.log('Connected to broker');
+                
+                // You can subscribe or publish here
+                client.subscribe('#', (err) => {
+                    if (!err) {
+                        console.log('Subscribed to all');
+                    }
+                });
+            });
+
+            client.on('error', (error) => {
+                console.error('Connection error:', error);
+            });
+
+             // Handle incoming MQTT messages
+            client.on('message', (topic, message) => {
+                if(topic == "/state") {
+                    if(message.length > 0){
+                        state = JSON.parse(message)
+                        console.log("Received state")
+                        applyState(state)
+                    }
+                }else if(topic == "/erase"){
+                    $('.cell').css('background-color', '#000000');
+                    console.log("Clearing board")
+                }
+            });
+            
+
+            // Draw grid
+            const grid = $("#grid");
+            const colorPicker = $("#colorPicker");
+            let isDrawing = false;
+            let selectedColor = colorPicker.val();
+
+            const createGrid = (cols, rows) => {
+                for (let i = 0; i < cols * rows; i++) {
+                    // the LED strip is in a serpentine layout, so let's name these pixels correctly
+                    let row = Math.floor(i / cols);
+                    let col = row % 2 === 0 ? i % cols : cols - 1 - (i % cols);
+                    let pixel = row * cols + col;
+                    grid.append(`<div class="cell" data-pixel="${pixel}"></div>`);
+                }
+            };
+
+            createGrid(20, 15);
+
+            // Update selected color when user changes the color picker
+            colorPicker.on('input', function () {
+                selectedColor = $(this).val();
+            });
+
+            // Prevent default touch behavior (like scrolling) while drawing
+            const preventScroll = (e) => e.preventDefault();
+
+            // Function to get the element at touch coordinates
+            const getCellFromTouch = (touch) => {
+                const touchX = touch.clientX;
+                const touchY = touch.clientY;
+                return document.elementFromPoint(touchX, touchY);
+            };
+
+            var changedPixels = []
+
+            const sendState = function () {
+                state = genState()
+                client.publish('/state', JSON.stringify(state), {retain: true})
+
+                // generate changes
+                const buffer = new ArrayBuffer(changedPixels.length * 5); // 5 bytes per object
+                const view = new DataView(buffer);
+                changedPixels.forEach((p, index) => {
+                    let rgb = getRGB(p)
+                    const offset = index * 5;
+                    view.setUint16(offset, p, true);  // Set ID (2 bytes, little-endian)
+                    view.setUint8(offset + 2, rgb.r); // Set R (1 byte)
+                    view.setUint8(offset + 3, rgb.g); // Set G (1 byte)
+                    view.setUint8(offset + 4, rgb.b); // Set B (1 byte)
+                    console.log(`R: ${rgb.r}, G: ${rgb.g}, B: ${rgb.b}`);
+                });
+                client.publish('/changes', new Uint8Array(buffer));
+                console.log(state)
+            };
+
+            // Handle mouse and touch events
+            const startDrawing = function (e) {
+                isDrawing = true;
+                $(this).css('background-color', selectedColor);
+                changedPixels = [$(this).data('pixel')]
+                e.preventDefault(); // Prevent touch scroll on mobile
+            };
+
+            const continueDrawing = function (e) {
+                if (isDrawing) {
+                    let targetCell = this;
+
+                    // Handle touch dragging
+                    if (e.type === 'touchmove') {
+                        const touch = e.touches[0];
+                        targetCell = getCellFromTouch(touch);
+                    }
+
+                    if (targetCell && $(targetCell).hasClass('cell')) {
+                        $(targetCell).css('background-color', selectedColor);
+                        let pixel = $(targetCell).data('pixel');
+                        if (changedPixels.indexOf(pixel) === -1) changedPixels.push(pixel);
+                    }
+                }
+                e.preventDefault(); // Prevent touch scroll on mobile
+            };
+
+            const stopDrawing = function () {
+                isDrawing = false;
+                if(changedPixels.length > 0) {
+                    sendState();
+                    console.log(changedPixels);
+                    changedPixels = [];
+                }
+            };
+
+            // Attach mouse events
+            grid.on('mousedown', '.cell', startDrawing);
+            grid.on('mouseenter', '.cell', continueDrawing);
+            $(document).on('mouseup', stopDrawing);
+
+            // Attach touch events for mobile devices
+            grid.on('touchstart', '.cell', startDrawing);
+            grid.on('touchmove', continueDrawing); // Handle touch move on the grid
+            $(document).on('touchend', stopDrawing);
+
+            // Prevent scrolling while drawing on mobile
+            grid.on('touchmove', preventScroll);
+
+            $('#erase').click(function() {
+                $('.cell').css('background-color', '#000000');
+                client.publish('/state', "", {retain: true})
+                client.publish('/erase', "1")
+            } );
+
+        });
+    </script>
+</body>
+</html>
