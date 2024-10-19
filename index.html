@@ -158,26 +158,40 @@
                 client.publish('/state', JSON.stringify(state), {retain: true})
 
                 // generate changes
-                const buffer = new ArrayBuffer(changedPixels.length * 5); // 5 bytes per object
+                // const buffer = new ArrayBuffer(changedPixels.length * 5); // 5 bytes per object
+                // const view = new DataView(buffer);
+                // changedPixels.forEach((p, index) => {
+                //     let rgb = getRGB(p)
+                //     const offset = index * 5;
+                //     view.setUint16(offset, p, true);  // Set ID (2 bytes, little-endian)
+                //     view.setUint8(offset + 2, rgb.r); // Set R (1 byte)
+                //     view.setUint8(offset + 3, rgb.g); // Set G (1 byte)
+                //     view.setUint8(offset + 4, rgb.b); // Set B (1 byte)
+                //     console.log(`R: ${rgb.r}, G: ${rgb.g}, B: ${rgb.b}`);
+                // });
+                // client.publish('/changes', new Uint8Array(buffer));
+                // console.log(state)
+            };
+
+            const sendPixel = function (p) {
+                // generate changes
+                const buffer = new ArrayBuffer(5); // 5 bytes per object
                 const view = new DataView(buffer);
-                changedPixels.forEach((p, index) => {
-                    let rgb = getRGB(p)
-                    const offset = index * 5;
-                    view.setUint16(offset, p, true);  // Set ID (2 bytes, little-endian)
-                    view.setUint8(offset + 2, rgb.r); // Set R (1 byte)
-                    view.setUint8(offset + 3, rgb.g); // Set G (1 byte)
-                    view.setUint8(offset + 4, rgb.b); // Set B (1 byte)
-                    console.log(`R: ${rgb.r}, G: ${rgb.g}, B: ${rgb.b}`);
-                });
+                let rgb = getRGB(p)
+                view.setUint16(0, p, true);  // Set ID (2 bytes, little-endian)
+                view.setUint8(2, rgb.r); // Set R (1 byte)
+                view.setUint8(3, rgb.g); // Set G (1 byte)
+                view.setUint8(4, rgb.b); // Set B (1 byte)
+                // console.log(`R: ${rgb.r}, G: ${rgb.g}, B: ${rgb.b}`);
                 client.publish('/changes', new Uint8Array(buffer));
-                console.log(state)
+                // console.log(state)
             };
 
             // Handle mouse and touch events
             const startDrawing = function (e) {
                 isDrawing = true;
                 $(this).css('background-color', selectedColor);
-                changedPixels = [$(this).data('pixel')]
+                sendPixel($(this).data('pixel'));
                 e.preventDefault(); // Prevent touch scroll on mobile
             };
 
@@ -193,8 +207,7 @@
 
                     if (targetCell && $(targetCell).hasClass('cell')) {
                         $(targetCell).css('background-color', selectedColor);
-                        let pixel = $(targetCell).data('pixel');
-                        if (changedPixels.indexOf(pixel) === -1) changedPixels.push(pixel);
+                        sendPixel($(targetCell).data('pixel'));
                     }
                 }
                 e.preventDefault(); // Prevent touch scroll on mobile
@@ -202,11 +215,6 @@
 
             const stopDrawing = function () {
                 isDrawing = false;
-                if(changedPixels.length > 0) {
-                    sendState();
-                    console.log(changedPixels);
-                    changedPixels = [];
-                }
             };
 
             // Attach mouse events
