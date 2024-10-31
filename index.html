@@ -24,7 +24,18 @@
 
         /* Ensure color picker is responsive */
         h3, #colorPicker {
-            margin: 10px;
+            margin: .5vw 2.5vw;
+        }
+
+        #swatches {
+            margin: 0.5vw 2.5vw;
+        }
+
+        .dot {
+            height: 5vw;
+            width: 5vw;
+            border-radius: 50%;
+            display: inline-block;
         }
     </style>
 </head>
@@ -33,11 +44,24 @@
     <h3>Select Color:</h3>
     <input type="color" id="colorPicker" value="#ff0000">
     <input type="button" id="erase" value="Erase">
+    <div id="swatches">
+        <span class="dot" style="background-color: #000000;"></span>
+        <span class="dot" style="background-color: #ff0000;"></span>
+        <span class="dot" style="background-color: #00ff00;"></span>
+        <span class="dot" style="background-color: #0000ff;"></span>
+        <span class="dot" style="background-color: #ff8800;"></span>
+        <span class="dot" style="background-color: #ff00ff;"></span>
+        <span class="dot" style="background-color: #ffff00;"></span>
+        <span class="dot" style="background-color: #8800ff;"></span>
+
+    </div>
     <div id="grid"></div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script>
+        const rgb2hex = (rgb) => `#${rgb.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/).slice(1).map(n => parseInt(n, 10).toString(16).padStart(2, '0')).join('')}`
+
         function genState() {
             var state = {}
             $(".cell").each(function( index ) {
@@ -156,21 +180,6 @@
             const sendState = function () {
                 state = genState()
                 client.publish('/state', JSON.stringify(state), {retain: true})
-
-                // generate changes
-                // const buffer = new ArrayBuffer(changedPixels.length * 5); // 5 bytes per object
-                // const view = new DataView(buffer);
-                // changedPixels.forEach((p, index) => {
-                //     let rgb = getRGB(p)
-                //     const offset = index * 5;
-                //     view.setUint16(offset, p, true);  // Set ID (2 bytes, little-endian)
-                //     view.setUint8(offset + 2, rgb.r); // Set R (1 byte)
-                //     view.setUint8(offset + 3, rgb.g); // Set G (1 byte)
-                //     view.setUint8(offset + 4, rgb.b); // Set B (1 byte)
-                //     console.log(`R: ${rgb.r}, G: ${rgb.g}, B: ${rgb.b}`);
-                // });
-                // client.publish('/changes', new Uint8Array(buffer));
-                // console.log(state)
             };
 
             const sendPixel = function (p) {
@@ -235,6 +244,12 @@
                 $('.cell').css('background-color', '#000000');
                 client.publish('/state', "", {retain: true})
                 client.publish('/erase', "1")
+            } );
+
+            $('.dot').click(function() {
+                selectedColor = rgb2hex($(this).css('background-color'));
+                console.log(selectedColor);
+                $('#colorPicker').val(selectedColor);
             } );
 
         });
